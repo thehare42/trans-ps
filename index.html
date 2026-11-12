@@ -21,22 +21,33 @@
     font-family: "Sarabun", "Noto Sans Thai", "Leelawadee UI", system-ui, sans-serif; overflow: hidden; }
   #stage { position: fixed; inset: 0; }
   video, #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
-  video { object-fit: contain; background: #000; }
+  video { object-fit: contain; background: #000; transition: opacity .2s; }
+  body.nocam video { opacity: 0; }
   #overlay { touch-action: none; }
 
-  #result { position: absolute; left: 0; right: 0; top: 0; padding: 12px 16px calc(10px) ;
-    padding-top: max(12px, env(safe-area-inset-top)); background: var(--panel);
-    pointer-events: auto; }
-  #thai { font-size: clamp(20px, 5.4vw, 34px); line-height: 1.35; font-weight: 600; min-height: 1.35em;
-    color: var(--accent); text-shadow: 0 1px 2px #000; }
-  #eng { font-size: 14px; color: var(--muted); margin-top: 4px; min-height: 1.2em; }
-  #status { font-size: 12px; color: var(--muted); margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap; }
+  /* translation sits right on top of the subtitle box */
+  #sub { position: absolute; display: none; text-align: center; pointer-events: none; z-index: 2; }
+  #sub.show { display: block; }
+  #thai { display: inline-block; max-width: 100%; padding: 4px 12px; border-radius: 8px; background: rgba(0,0,0,0.82);
+    color: var(--accent); font-weight: 700; line-height: 1.3; text-shadow: 0 1px 2px #000; word-break: break-word; }
+  #eng { display: none; margin-top: 3px; font-size: 13px; color: #d4d4d8; background: rgba(0,0,0,0.7);
+    padding: 2px 8px; border-radius: 6px; }
+  body.showeng #eng { display: inline-block; }
+  body.nocam #thai { background: transparent; }
+
+  #result { position: absolute; left: 0; right: 0; top: 0; padding: 8px 16px;
+    padding-top: max(8px, env(safe-area-inset-top)); background: var(--panel); z-index: 3; }
+  #status { font-size: 12px; color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap; }
   #status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #555; margin-right: 4px; vertical-align: middle; }
   #status .on { background: #4ade80; }
   #status .busy { background: var(--accent); }
 
   #bar { position: absolute; left: 0; right: 0; bottom: 0; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
-    padding: 10px 16px; padding-bottom: max(10px, env(safe-area-inset-bottom)); background: var(--panel); }
+    padding: 10px 16px; padding-bottom: max(10px, env(safe-area-inset-bottom)); background: var(--panel); z-index: 3; }
+  body.clean #result, body.clean #bar { display: none; }
+  #hint { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); font-size: 12px; color: #71717a;
+    display: none; z-index: 3; pointer-events: none; }
+  body.clean #hint { display: block; }
   button, select { font: inherit; font-size: 15px; color: var(--text); background: #27272a; border: 1px solid #3f3f46;
     border-radius: 10px; padding: 9px 14px; }
   button.primary { background: #0e7490; border-color: #22d3ee; }
@@ -50,6 +61,7 @@
   .row label { display: block; font-size: 14px; color: var(--muted); margin-bottom: 4px; }
   .row input[type=range] { width: 100%; }
   .row select { width: 100%; }
+  .row .check { display: flex; align-items: center; gap: 8px; color: var(--text); }
   #preview { width: 100%; image-rendering: pixelated; background: #fff; border-radius: 6px; margin-top: 6px; }
   #history div { padding: 8px 0; border-bottom: 1px solid #27272a; }
   #history .h-th { color: var(--accent); }
@@ -67,9 +79,9 @@
   <video id="video" playsinline muted autoplay></video>
   <canvas id="overlay"></canvas>
 
+  <div id="sub"><div id="thai"></div><br><div id="eng"></div></div>
+
   <div id="result">
-    <div id="thai"></div>
-    <div id="eng"></div>
     <div id="status">
       <span><span class="dot" id="dotCam"></span><span id="stCam">กล้อง</span></span>
       <span><span class="dot" id="dotOcr"></span><span id="stOcr">OCR กำลังโหลด…</span></span>
@@ -78,34 +90,28 @@
   </div>
 
   <div id="bar">
-    <button id="btnVoice">🔊 เสียง</button>
     <button id="btnBox">ลากกรอบซับ</button>
-    <button id="btnPause">หยุด</button>
+    <button id="btnCam">ซ่อนภาพกล้อง</button>
+    <button id="btnClean">ซ่อนปุ่ม</button>
     <button id="btnNow" class="primary">แปลเดี๋ยวนี้</button>
+    <button id="btnPause">หยุด</button>
     <button id="btnHist">ประวัติ</button>
     <button id="btnSet">ตั้งค่า</button>
   </div>
+  <div id="hint">แตะจอเพื่อแสดงปุ่ม</div>
 
   <div class="sheet" id="sheetSet">
     <h3>ตั้งค่า</h3>
-    <div class="row" id="voiceWarn" hidden style="color:var(--danger);font-size:14px;line-height:1.5"></div>
     <div class="row">
-      <label>เสียงอ่าน</label>
-      <select id="voice"></select>
+      <label>ขนาดตัวอักษรคำแปล: <span id="fontVal"></span></label>
+      <input type="range" id="font" min="0.6" max="2" step="0.1">
     </div>
     <div class="row">
-      <label>ความเร็วเสียง: <span id="rateVal"></span></label>
-      <input type="range" id="rate" min="0.8" max="2" step="0.1">
+      <label class="check"><input type="checkbox" id="showEng"> แสดงภาษาอังกฤษที่อ่านได้ใต้คำแปล</label>
     </div>
     <div class="row">
-      <label>เมื่อซับใหม่มาระหว่างกำลังพูด</label>
-      <select id="ttsMode">
-        <option value="latest">พูดประโยคเดิมให้จบ แล้วข้ามไปบรรทัดล่าสุด (แนะนำ)</option>
-        <option value="cut">ตัดเสียงเก่า อ่านบรรทัดใหม่ทันที</option>
-        <option value="queue">อ่านต่อคิวจนจบทุกบรรทัด (อาจล้าหลังเกม)</option>
-      </select>
+      <label class="check"><input type="checkbox" id="joinLines"> ต่อประโยคที่ถูกแบ่งเป็น 2 ซับ แล้วแปลรวมกัน</label>
     </div>
-    <div class="row"><button id="btnTestVoice">ทดสอบเสียง</button></div>
     <div class="row" id="zoomRow" hidden>
       <label>ซูมกล้อง: <span id="zoomVal"></span></label>
       <input type="range" id="zoom">
@@ -119,7 +125,7 @@
       </select>
     </div>
     <div class="row">
-      <label>ความสว่างขั้นต่ำของตัวอักษร: <span id="thrVal"></span> <small>(ใช้กับโหมดตัวขาว/ตัวดำ ดูภาพตัวอย่างด้านล่าง ตัวอักษรต้องเป็นสีดำชัด)</small></label>
+      <label>ความสว่างขั้นต่ำของตัวอักษร: <span id="thrVal"></span> <small>(ดูภาพตัวอย่างด้านล่าง ตัวอักษรต้องเป็นสีดำชัด)</small></label>
       <input type="range" id="thr" min="60" max="250" step="5">
     </div>
     <div class="row">
@@ -141,7 +147,7 @@
 
   <div id="start">
     <h2 style="margin:0">แปลซับเกม</h2>
-    <p>วางมือถือบนขาตั้งให้นิ่ง เล็งกล้องไปที่จอทีวี แล้วลากกรอบให้ครอบเฉพาะบรรทัดซับ แอปจะอ่านและแปลเป็นไทยให้ทุกครั้งที่ซับเปลี่ยน</p>
+    <p>วางมือถือบนขาตั้งใต้จอทีวีให้นิ่ง เล็งกล้องไปที่จอ แล้วลากกรอบให้ครอบเฉพาะบรรทัดซับ คำแปลไทยจะขึ้นทับตรงซับทุกครั้งที่ซับเปลี่ยน</p>
     <button id="btnStart" class="primary">เปิดกล้อง</button>
     <p id="err"></p>
   </div>
@@ -156,23 +162,22 @@
 
   // ---------- settings ----------
   const DEFAULTS = { box: { x: 0.08, y: 0.70, w: 0.84, h: 0.20 }, mode: 'white', thr: 170, sens: 8,
-    tts: true, rate: 1.5, ttsMode: 'latest', voice: '', v: 2 };
+    font: 1, showEng: false, joinLines: true, nocam: false };
   let S = { ...DEFAULTS };
   try { Object.assign(S, JSON.parse(localStorage.getItem('subtr') || '{}')); } catch (e) {}
-  if (S.v !== 2) { S.ttsMode = 'latest'; S.rate = 1.5; S.v = 2; }   // migrate v1 voice defaults
+  for (const k of ['tts', 'rate', 'ttsMode', 'voice', 'v']) delete S[k];   // leftovers from the voice version
   const save = () => { try { localStorage.setItem('subtr', JSON.stringify(S)); } catch (e) {} };
 
   // ---------- state ----------
   let stream = null, track = null, worker = null, ocrReady = false;
   let paused = false, editing = false, busy = false;
   let prevSig = null, lastOcrSig = null, stableTicks = 0, changed = true;
-  let lastEng = '', lastSpokenEng = '', history = [];
+  let lastEng = '', lastEngAt = 0, lastShownEng = '', history = [];
   const cache = new Map();
 
   // ---------- camera ----------
   $('btnStart').onclick = async () => {
     $('err').textContent = '';
-    unlockSpeech();   // iOS/iPadOS only allows speech after a user tap
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
@@ -243,6 +248,11 @@
     const w = vw * s, h = vh * s;
     return { x: (cw - w) / 2, y: (ch - h) / 2, w, h };
   }
+  function boxRect(b) {
+    const r = videoRect();
+    b = b || S.box;
+    return { x: r.x + b.x * r.w, y: r.y + b.y * r.h, w: b.w * r.w, h: b.h * r.h };
+  }
 
   function resize() {
     const dpr = window.devicePixelRatio || 1;
@@ -255,21 +265,37 @@
   video.addEventListener('loadedmetadata', resize);
 
   function drawBox(tmp) {
-    const r = videoRect(), b = tmp || S.box;
+    const { x, y, w, h } = boxRect(tmp);
     octx.clearRect(0, 0, overlay.clientWidth, overlay.clientHeight);
-    const x = r.x + b.x * r.w, y = r.y + b.y * r.h, w = b.w * r.w, h = b.h * r.h;
     if (editing) {
       octx.fillStyle = 'rgba(0,0,0,0.45)';
       octx.fillRect(0, 0, overlay.clientWidth, overlay.clientHeight);
       octx.clearRect(x, y, w, h);
     }
-    octx.strokeStyle = editing ? '#facc15' : '#22d3ee';
-    octx.lineWidth = 2;
-    octx.setLineDash(editing ? [8, 6] : []);
-    octx.strokeRect(x, y, w, h);
+    if (editing || !S.nocam) {
+      octx.strokeStyle = editing ? '#facc15' : 'rgba(34,211,238,0.5)';
+      octx.lineWidth = 2;
+      octx.setLineDash(editing ? [8, 6] : []);
+      octx.strokeRect(x, y, w, h);
+    }
+    placeSub();
   }
 
-  // ---------- drag to set box ----------
+  // put the Thai text exactly over the subtitle box; it grows upward if it needs more lines
+  function placeSub() {
+    const sub = $('sub'), { x, y, w, h } = boxRect();
+    const cw = overlay.clientWidth;
+    const width = Math.max(w, cw * 0.6);
+    const left = Math.min(Math.max(0, x + w / 2 - width / 2), cw - width);
+    const font = Math.max(16, Math.min(56, h * 0.42)) * S.font;
+    sub.style.left = left + 'px';
+    sub.style.width = width + 'px';
+    sub.style.bottom = (overlay.clientHeight - (y + h)) + 'px';
+    $('thai').style.fontSize = font + 'px';
+    sub.classList.toggle('show', !editing && !!$('thai').textContent);
+  }
+
+  // ---------- drag to set box / tap to show controls ----------
   let dragStart = null;
   const norm = (ev) => {
     const r = videoRect(), rc = overlay.getBoundingClientRect();
@@ -280,7 +306,10 @@
   };
   const boxFrom = (a, b) => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y) });
   overlay.addEventListener('pointerdown', (ev) => {
-    if (!editing) return;
+    if (!editing) {
+      if (document.body.classList.contains('clean')) document.body.classList.remove('clean');
+      return;
+    }
     dragStart = norm(ev);
     overlay.setPointerCapture(ev.pointerId);
   });
@@ -299,6 +328,8 @@
     editing = on;
     $('btnBox').classList.toggle('active', on);
     $('btnBox').textContent = on ? 'ลากนิ้วครอบซับ…' : 'ลากกรอบซับ';
+    if (on) document.body.classList.remove('nocam');
+    else document.body.classList.toggle('nocam', S.nocam);
     prevSig = null; lastOcrSig = null; changed = true;
     drawBox();
   }
@@ -400,15 +431,28 @@
   }
 
   // ---------- text helpers ----------
+  // typical camera-OCR confusions inside words: 0->o, 1->l, 5->s, 8->B ... only when the word is mostly letters
+  function fixWord(w) {
+    const letters = (w.match(/[A-Za-z]/g) || []).length, digits = (w.match(/[0-9]/g) || []).length;
+    if (letters && digits && letters >= digits) {
+      w = w.replace(/0/g, 'o').replace(/1/g, 'l').replace(/5/g, 's').replace(/8/g, 'B').replace(/6/g, 'b');
+    }
+    if (w === 'l' || w === '|' || w === '1') return 'I';          // lone "l" is almost always the pronoun I
+    w = w.replace(/^l(?=['’](m|ll|ve|d)$)/, 'I');                  // l'm -> I'm
+    w = w.replace(/^([A-Za-z]+)\|$/, '$1!');
+    return w;
+  }
+
   function cleanText(data) {
     const words = (data.words || []).filter(w => w.confidence >= 45).map(w => w.text);
     let t = (words.length ? words.join(' ') : (data.text || '')).replace(/\s+/g, ' ').trim();
-    t = t.replace(/[|_~=<>{}\[\]]+/g, '').replace(/\s+([.,!?;:])/g, '$1');
-    // drop stray 1-char junk except real words
-    t = t.split(' ').filter(w => {
+    t = t.replace(/[_~=<>{}\[\]]+/g, '').replace(/\s+([.,!?;:])/g, '$1');
+    t = t.replace(/(\w)- (\w)/g, '$1$2');                          // word broken across the 2 subtitle lines
+    t = t.split(' ').map(fixWord).filter(w => {
       const core = w.replace(/[^A-Za-z0-9]/g, '');
       return core.length > 1 || /^[AaI0-9]$/.test(core);
     }).join(' ');
+    t = t.replace(/^[^A-Za-z0-9"'“‘(]+/, '').replace(/\s{2,}/g, ' ');   // junk before the first word
     return t.trim();
   }
   function letters(t) { return (t.match(/[A-Za-z]/g) || []).length; }
@@ -426,16 +470,43 @@
     return 1 - prev[n] / Math.max(m, n);
   }
 
-  async function translate(text) {
+  // "KRATOS: Come here, boy." -> keep the speaker name in English, translate only the line
+  function splitSpeaker(t) {
+    const m = t.match(/^([A-Z][A-Za-z0-9 .'’-]{0,24}):\s+(.+)$/);
+    return m ? { who: m[1], line: m[2] } : { who: '', line: t };
+  }
+  const endsSentence = (t) => /[.!?…"”'’)]\s*$/.test(t);
+
+  async function gtranslate(text) {
     if (cache.has(text)) return cache.get(text);
     const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=th&dt=t&q=' + encodeURIComponent(text);
     const res = await fetch(url);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const j = await res.json();
-    const th = (j[0] || []).map(x => x[0]).join('');
+    const th = (j[0] || []).map(x => x[0]).join('').trim();
     cache.set(text, th);
     if (cache.size > 300) cache.delete(cache.keys().next().value);
     return th;
+  }
+
+  async function translate(eng) {
+    const { who, line } = splitSpeaker(eng);
+    let src = line, joined = false;
+    // previous subtitle stopped mid-sentence -> translate both together so the Thai makes sense
+    if (S.joinLines && lastShownEng && Date.now() - lastEngAt < 8000) {
+      const prev = splitSpeaker(lastShownEng);
+      if (!endsSentence(prev.line) && (!who || who === prev.who) && /^[a-z,]/.test(line)) {
+        src = prev.line + ' ' + line; joined = true;
+      }
+    }
+    const th = await gtranslate(src);
+    return { th: (who ? who + ': ' : '') + th, joined };
+  }
+
+  function show(th, eng) {
+    $('thai').textContent = th;
+    $('eng').textContent = eng;
+    placeSub();
   }
 
   // ---------- main pipeline ----------
@@ -449,20 +520,15 @@
       lastOcrSig = signature(frame.g, frame.W, frame.H);
       const { data } = await worker.recognize(binarize(frame));
       const eng = cleanText(data);
-      const sure = (data.confidence || 0) >= 35;
       const t1 = performance.now();
       if (letters(eng) < 3) { $('stTime').textContent = 'ไม่พบข้อความ'; return; }
       if (!force && similarity(eng, lastEng) > 0.82) { $('stTime').textContent = 'ซับเดิม'; return; }
       lastEng = eng;
-      $('eng').textContent = eng;
-      const th = await translate(eng);
+      const { th, joined } = await translate(eng);
       const t2 = performance.now();
-      $('thai').textContent = th;
-      $('stTime').textContent = `อ่าน ${Math.round(t1 - t0)}ms · แปล ${Math.round(t2 - t1)}ms`;
-      if (force) { lastSpokenEng = eng; speak(th, true); }
-      else if (!sure) { if (S.tts) $('stTime').textContent += ' · ไม่พูด (OCR ไม่มั่นใจ)'; }
-      // OCR often re-reads the same line with 1-2 letters different: don't restart the voice for that
-      else if (similarity(eng, lastSpokenEng) < 0.7) { lastSpokenEng = eng; speak(th); }
+      show(th, eng);
+      lastShownEng = eng; lastEngAt = Date.now();
+      $('stTime').textContent = `อ่าน ${Math.round(t1 - t0)}ms · แปล ${Math.round(t2 - t1)}ms${joined ? ' · ต่อประโยค' : ''}`;
       history.unshift({ en: eng, th });
       if (history.length > 50) history.pop();
     } catch (e) {
@@ -473,7 +539,7 @@
     }
   }
 
-  // every ~200ms: check if subtitle area changed; OCR once it has settled
+  // every ~150ms: check if subtitle area changed; OCR once it has settled
   function loop() {
     setTimeout(loop, 150);
     if (paused || editing || busy || !ocrReady) return;
@@ -491,104 +557,6 @@
     }
   }
 
-  // ---------- text-to-speech ----------
-  const synth = window.speechSynthesis;
-  let thaiVoices = [];
-
-  function loadVoices() {
-    if (!synth) return;
-    thaiVoices = synth.getVoices().filter(v => /^th/i.test(v.lang));
-    const sel = $('voice');
-    sel.innerHTML = '';
-    const def = document.createElement('option');
-    def.value = ''; def.textContent = thaiVoices.length ? 'ค่าเริ่มต้นของเครื่อง (ไทย)' : 'ค่าเริ่มต้นของเครื่อง';
-    sel.append(def);
-    for (const v of thaiVoices) {
-      const o = document.createElement('option');
-      o.value = v.voiceURI; o.textContent = v.name + (v.localService ? '' : ' (ออนไลน์)');
-      sel.append(o);
-    }
-    sel.value = thaiVoices.some(v => v.voiceURI === S.voice) ? S.voice : '';
-    const warn = $('voiceWarn');
-    if (!synth) {
-      warn.hidden = false; warn.textContent = 'เบราว์เซอร์นี้ไม่รองรับการอ่านออกเสียง';
-    } else if (!thaiVoices.length) {
-      warn.hidden = false;
-      warn.textContent = 'ไม่พบเสียงภาษาไทยในเครื่อง — Samsung: ตั้งค่า → การจัดการทั่วไป → ภาษา → การแปลงข้อความเป็นเสียง → เลือก "Speech Recognition and Synthesis from Google" → ⚙ → ติดตั้งข้อมูลเสียง → ไทย แล้วปิดเปิด Chrome ใหม่ · iPad: ตั้งค่า → การช่วยการเข้าถึง → เนื้อหาที่พูด → เสียง → ไทย';
-    } else {
-      warn.hidden = true;
-    }
-  }
-  if (synth) {
-    loadVoices();
-    synth.addEventListener ? synth.addEventListener('voiceschanged', loadVoices) : (synth.onvoiceschanged = loadVoices);
-  } else {
-    loadVoices();
-  }
-
-  function unlockSpeech() {
-    if (!synth) return;
-    try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; synth.speak(u); } catch (e) {}
-  }
-
-  // We run our own queue instead of the browser's: Android Chrome loses utterances
-  // (garbage collection, missing onend) and cancel() can swallow the next speak().
-  let ttsQueue = [], curU = null, curStart = 0;
-  const keep = new Set();   // hold references so Chrome doesn't GC an utterance mid-speech
-
-  function sayNow(text) {
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'th-TH';
-    u.rate = S.rate;
-    const voice = thaiVoices.find(x => x.voiceURI === S.voice)
-      || thaiVoices.find(x => x.localService) || thaiVoices[0];   // offline voice starts faster
-    if (voice) u.voice = voice;
-    const done = () => { keep.delete(u); if (curU === u) { curU = null; flushTts(); } };
-    u.onend = done; u.onerror = done;
-    keep.add(u); curU = u; curStart = Date.now();
-    synth.speak(u);
-  }
-  function flushTts() {
-    if (curU || !ttsQueue.length) return;
-    sayNow(ttsQueue.shift());
-  }
-  // watchdog: if the browser silently stopped without onend, move on
-  setInterval(() => {
-    if (!synth) return;
-    if (curU && !synth.speaking && !synth.pending && Date.now() - curStart > 700) { keep.delete(curU); curU = null; }
-    flushTts();
-  }, 250);
-
-  function speak(text, always) {
-    if (!synth || !text || (!S.tts && !always)) return;
-    if (always || S.ttsMode === 'cut') {
-      ttsQueue = [];
-      if (curU || synth.speaking || synth.pending) {
-        curU = null; synth.cancel();
-        setTimeout(() => sayNow(text), 80);   // Chrome may drop a speak() issued right after cancel()
-      } else sayNow(text);
-      return;
-    }
-    if (S.ttsMode === 'latest') ttsQueue = [text];   // finish current sentence, then jump to newest line
-    else ttsQueue.push(text);
-    flushTts();
-  }
-
-  function setTts(on) {
-    S.tts = on; save();
-    $('btnVoice').textContent = on ? '🔊 เสียง' : '🔇 ปิดเสียง';
-    $('btnVoice').classList.toggle('active', !on);
-    if (!on && synth) { ttsQueue = []; curU = null; synth.cancel(); }
-  }
-  setTts(S.tts);
-  $('btnVoice').onclick = () => { unlockSpeech(); setTts(!S.tts); };
-  $('btnTestVoice').onclick = () => speak('สวัสดีครับ นี่คือเสียงทดสอบสำหรับแปลซับเกม', true);
-  $('voice').onchange = () => { S.voice = $('voice').value; save(); };
-  $('ttsMode').value = S.ttsMode;
-  $('ttsMode').onchange = () => { S.ttsMode = $('ttsMode').value; save(); };
-  // tap the Thai line to hear it again
-  $('thai').onclick = () => speak($('thai').textContent, true);
-
   // ---------- UI ----------
   $('btnPause').onclick = () => {
     paused = !paused;
@@ -596,6 +564,17 @@
     $('btnPause').classList.toggle('active', paused);
   };
   $('btnNow').onclick = () => { lastEng = ''; runOcr(true); };
+
+  const setNocam = (on) => {
+    S.nocam = on; save();
+    document.body.classList.toggle('nocam', on && !editing);
+    $('btnCam').textContent = on ? 'แสดงภาพกล้อง' : 'ซ่อนภาพกล้อง';
+    $('btnCam').classList.toggle('active', on);
+    drawBox();
+  };
+  setNocam(S.nocam);
+  $('btnCam').onclick = () => setNocam(!S.nocam);
+  $('btnClean').onclick = () => { openSheet(null); document.body.classList.add('clean'); };
 
   const openSheet = (id) => { ['sheetSet', 'sheetHist'].forEach(s => $(s).classList.toggle('open', s === id)); };
   $('btnSet').onclick = () => openSheet($('sheetSet').classList.contains('open') ? null : 'sheetSet');
@@ -613,16 +592,23 @@
   };
   $('btnCloseHist').onclick = () => openSheet(null);
 
-  const bindRange = (id, key, fmt) => {
+  const bindRange = (id, key, fmt, after) => {
     const el = $(id), out = $(id + 'Val');
     el.value = S[key]; out.textContent = fmt(S[key]);
-    el.oninput = () => { S[key] = Number(el.value); out.textContent = fmt(S[key]); save(); changed = true; previewTick(); };
+    el.oninput = () => { S[key] = Number(el.value); out.textContent = fmt(S[key]); save(); (after || previewTick)(); };
   };
-  bindRange('thr', 'thr', v => v);
-  bindRange('rate', 'rate', v => Number(v).toFixed(1) + 'x');
-  bindRange('sens', 'sens', v => v <= 5 ? `${v} (ไวมาก)` : v >= 18 ? `${v} (ไม่ไว)` : v);
+  bindRange('thr', 'thr', v => v, () => { changed = true; previewTick(); });
+  bindRange('sens', 'sens', v => v <= 5 ? `${v} (ไวมาก)` : v >= 18 ? `${v} (ไม่ไว)` : v, () => { changed = true; });
+  bindRange('font', 'font', v => Math.round(v * 100) + '%', placeSub);
   $('mode').value = S.mode;
   $('mode').onchange = () => { S.mode = $('mode').value; save(); changed = true; previewTick(); };
+  const bindCheck = (id, key, after) => {
+    $(id).checked = !!S[key];
+    $(id).onchange = () => { S[key] = $(id).checked; save(); if (after) after(); };
+  };
+  bindCheck('showEng', 'showEng', () => document.body.classList.toggle('showeng', S.showEng));
+  bindCheck('joinLines', 'joinLines');
+  document.body.classList.toggle('showeng', S.showEng);
 
   // keep the preview live while settings are open
   function previewTick() { if (!busy) { const f = grabGray(); if (f) binarize(f); } }
