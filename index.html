@@ -78,6 +78,7 @@
   </div>
 
   <div id="bar">
+    <button id="btnVoice">🔊 เสียง</button>
     <button id="btnBox">ลากกรอบซับ</button>
     <button id="btnPause">หยุด</button>
     <button id="btnNow" class="primary">แปลเดี๋ยวนี้</button>
@@ -87,6 +88,23 @@
 
   <div class="sheet" id="sheetSet">
     <h3>ตั้งค่า</h3>
+    <div class="row" id="voiceWarn" hidden style="color:var(--danger);font-size:14px;line-height:1.5"></div>
+    <div class="row">
+      <label>เสียงอ่าน</label>
+      <select id="voice"></select>
+    </div>
+    <div class="row">
+      <label>ความเร็วเสียง: <span id="rateVal"></span></label>
+      <input type="range" id="rate" min="0.8" max="2" step="0.1">
+    </div>
+    <div class="row">
+      <label>เมื่อซับใหม่มาระหว่างกำลังพูด</label>
+      <select id="ttsMode">
+        <option value="cut">ตัดเสียงเก่า อ่านบรรทัดใหม่ทันที (ไม่ล้าหลังเกม)</option>
+        <option value="queue">อ่านต่อคิวจนจบทุกบรรทัด</option>
+      </select>
+    </div>
+    <div class="row"><button id="btnTestVoice">ทดสอบเสียง</button></div>
     <div class="row" id="zoomRow" hidden>
       <label>ซูมกล้อง: <span id="zoomVal"></span></label>
       <input type="range" id="zoom">
@@ -136,7 +154,8 @@
   const video = $('video'), overlay = $('overlay'), octx = overlay.getContext('2d');
 
   // ---------- settings ----------
-  const DEFAULTS = { box: { x: 0.08, y: 0.70, w: 0.84, h: 0.20 }, mode: 'white', thr: 170, sens: 8 };
+  const DEFAULTS = { box: { x: 0.08, y: 0.70, w: 0.84, h: 0.20 }, mode: 'white', thr: 170, sens: 8,
+    tts: true, rate: 1.3, ttsMode: 'cut', voice: '' };
   let S = { ...DEFAULTS };
   try { Object.assign(S, JSON.parse(localStorage.getItem('subtr') || '{}')); } catch (e) {}
   const save = () => { try { localStorage.setItem('subtr', JSON.stringify(S)); } catch (e) {} };
@@ -151,6 +170,7 @@
   // ---------- camera ----------
   $('btnStart').onclick = async () => {
     $('err').textContent = '';
+    unlockSpeech();   // iOS/iPadOS only allows speech after a user tap
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
@@ -427,6 +447,7 @@
       lastOcrSig = signature(frame.g, frame.W, frame.H);
       const { data } = await worker.recognize(binarize(frame));
       const eng = cleanText(data);
+      const sure = (data.confidence || 0) >= 55;
       const t1 = performance.now();
       if (letters(eng) < 3) { $('stTime').textContent = 'ไม่พบข้อความ'; return; }
       if (!force && similarity(eng, lastEng) > 0.82) { $('stTime').textContent = 'ซับเดิม'; return; }
@@ -436,6 +457,8 @@
       const t2 = performance.now();
       $('thai').textContent = th;
       $('stTime').textContent = `อ่าน ${Math.round(t1 - t0)}ms · แปล ${Math.round(t2 - t1)}ms`;
+      if (sure || force) speak(th);
+      else if (S.tts) $('stTime').textContent += ' · ไม่อ่านออกเสียง (OCR ไม่มั่นใจ)';
       history.unshift({ en: eng, th });
       if (history.length > 50) history.pop();
     } catch (e) {
@@ -463,6 +486,76 @@
       changed = true;   // slow change (e.g. fade) that slipped past the per-tick check
     }
   }
+
+  // ---------- text-to-speech ----------
+  const synth = window.speechSynthesis;
+  let thaiVoices = [];
+
+  function loadVoices() {
+    if (!synth) return;
+    thaiVoices = synth.getVoices().filter(v => /^th/i.test(v.lang));
+    const sel = $('voice');
+    sel.innerHTML = '';
+    const def = document.createElement('option');
+    def.value = ''; def.textContent = thaiVoices.length ? 'ค่าเริ่มต้นของเครื่อง (ไทย)' : 'ค่าเริ่มต้นของเครื่อง';
+    sel.append(def);
+    for (const v of thaiVoices) {
+      const o = document.createElement('option');
+      o.value = v.voiceURI; o.textContent = v.name + (v.localService ? '' : ' (ออนไลน์)');
+      sel.append(o);
+    }
+    sel.value = thaiVoices.some(v => v.voiceURI === S.voice) ? S.voice : '';
+    const warn = $('voiceWarn');
+    if (!synth) {
+      warn.hidden = false; warn.textContent = 'เบราว์เซอร์นี้ไม่รองรับการอ่านออกเสียง';
+    } else if (!thaiVoices.length) {
+      warn.hidden = false;
+      warn.textContent = 'ไม่พบเสียงภาษาไทยในเครื่อง — Samsung: ตั้งค่า → การจัดการทั่วไป → ภาษา → การแปลงข้อความเป็นเสียง → เลือก "Speech Recognition and Synthesis from Google" → ⚙ → ติดตั้งข้อมูลเสียง → ไทย แล้วปิดเปิด Chrome ใหม่ · iPad: ตั้งค่า → การช่วยการเข้าถึง → เนื้อหาที่พูด → เสียง → ไทย';
+    } else {
+      warn.hidden = true;
+    }
+  }
+  if (synth) {
+    loadVoices();
+    synth.addEventListener ? synth.addEventListener('voiceschanged', loadVoices) : (synth.onvoiceschanged = loadVoices);
+  } else {
+    loadVoices();
+  }
+
+  function unlockSpeech() {
+    if (!synth) return;
+    try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; synth.speak(u); } catch (e) {}
+  }
+
+  function speak(text, always) {
+    if (!synth || !text || (!S.tts && !always)) return;
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'th-TH';
+    u.rate = S.rate;
+    const voice = thaiVoices.find(x => x.voiceURI === S.voice) || thaiVoices[0];
+    if (voice) u.voice = voice;
+    if ((S.ttsMode === 'cut' || always) && (synth.speaking || synth.pending)) {
+      synth.cancel();
+      setTimeout(() => synth.speak(u), 60);   // Chrome may drop a speak() issued right after cancel()
+    } else {
+      synth.speak(u);
+    }
+  }
+
+  function setTts(on) {
+    S.tts = on; save();
+    $('btnVoice').textContent = on ? '🔊 เสียง' : '🔇 ปิดเสียง';
+    $('btnVoice').classList.toggle('active', !on);
+    if (!on && synth) synth.cancel();
+  }
+  setTts(S.tts);
+  $('btnVoice').onclick = () => { unlockSpeech(); setTts(!S.tts); };
+  $('btnTestVoice').onclick = () => speak('สวัสดีครับ นี่คือเสียงทดสอบสำหรับแปลซับเกม', true);
+  $('voice').onchange = () => { S.voice = $('voice').value; save(); };
+  $('ttsMode').value = S.ttsMode;
+  $('ttsMode').onchange = () => { S.ttsMode = $('ttsMode').value; save(); };
+  // tap the Thai line to hear it again
+  $('thai').onclick = () => speak($('thai').textContent, true);
 
   // ---------- UI ----------
   $('btnPause').onclick = () => {
@@ -494,6 +587,7 @@
     el.oninput = () => { S[key] = Number(el.value); out.textContent = fmt(S[key]); save(); changed = true; previewTick(); };
   };
   bindRange('thr', 'thr', v => v);
+  bindRange('rate', 'rate', v => Number(v).toFixed(1) + 'x');
   bindRange('sens', 'sens', v => v <= 5 ? `${v} (ไวมาก)` : v >= 18 ? `${v} (ไม่ไว)` : v);
   $('mode').value = S.mode;
   $('mode').onchange = () => { S.mode = $('mode').value; save(); changed = true; previewTick(); };
