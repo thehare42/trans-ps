@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Sub Translator</title>
+<style>
+  :root {
+    --bg: #000;
+    --panel: rgba(12, 14, 20, 0.86);
+    --text: #f4f4f5;
+    --muted: #a1a1aa;
+    --accent: #facc15;
+    --box: #22d3ee;
+    --danger: #f87171;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: "Sarabun", "Noto Sans Thai", "Leelawadee UI", system-ui, sans-serif; overflow: hidden; }
+  #stage { position: fixed; inset: 0; }
+  video, #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+  video { object-fit: contain; background: #000; }
+  #overlay { touch-action: none; }
+
+  #result { position: absolute; left: 0; right: 0; top: 0; padding: 12px 16px calc(10px) ;
+    padding-top: max(12px, env(safe-area-inset-top)); background: var(--panel);
+    pointer-events: auto; }
+  #thai { font-size: clamp(20px, 5.4vw, 34px); line-height: 1.35; font-weight: 600; min-height: 1.35em;
+    color: var(--accent); text-shadow: 0 1px 2px #000; }
+  #eng { font-size: 14px; color: var(--muted); margin-top: 4px; min-height: 1.2em; }
+  #status { font-size: 12px; color: var(--muted); margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap; }
+  #status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #555; margin-right: 4px; vertical-align: middle; }
+  #status .on { background: #4ade80; }
+  #status .busy { background: var(--accent); }
+
+  #bar { position: absolute; left: 0; right: 0; bottom: 0; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
+    padding: 10px 16px; padding-bottom: max(10px, env(safe-area-inset-bottom)); background: var(--panel); }
+  button, select { font: inherit; font-size: 15px; color: var(--text); background: #27272a; border: 1px solid #3f3f46;
+    border-radius: 10px; padding: 9px 14px; }
+  button.primary { background: #0e7490; border-color: #22d3ee; }
+  button.active { background: #a16207; border-color: var(--accent); }
+
+  .sheet { position: absolute; left: 0; right: 0; bottom: 0; max-height: 75%; overflow-y: auto; background: #111114f2;
+    border-top: 1px solid #3f3f46; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); display: none; z-index: 5; }
+  .sheet.open { display: block; }
+  .sheet h3 { margin: 0 0 12px; font-size: 17px; }
+  .row { margin: 12px 0; }
+  .row label { display: block; font-size: 14px; color: var(--muted); margin-bottom: 4px; }
+  .row input[type=range] { width: 100%; }
+  .row select { width: 100%; }
+  #preview { width: 100%; image-rendering: pixelated; background: #fff; border-radius: 6px; margin-top: 6px; }
+  #history div { padding: 8px 0; border-bottom: 1px solid #27272a; }
+  #history .h-th { color: var(--accent); }
+  #history .h-en { color: var(--muted); font-size: 13px; }
+
+  #start { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; padding: 24px; text-align: center; background: #000; z-index: 10; }
+  #start p { color: var(--muted); max-width: 420px; line-height: 1.6; margin: 0; }
+  #start button { font-size: 18px; padding: 14px 28px; }
+  #err { color: var(--danger); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="video" playsinline muted autoplay></video>
+  <canvas id="overlay"></canvas>
+
+  <div id="result">
+    <div id="thai"></div>
+    <div id="eng"></div>
+    <div id="status">
+      <span><span class="dot" id="dotCam"></span><span id="stCam">กล้อง</span></span>
+      <span><span class="dot" id="dotOcr"></span><span id="stOcr">OCR กำลังโหลด…</span></span>
+      <span id="stTime"></span>
+    </div>
+  </div>
+
+  <div id="bar">
+    <button id="btnBox">ลากกรอบซับ</button>
+    <button id="btnPause">หยุด</button>
+    <button id="btnNow" class="primary">แปลเดี๋ยวนี้</button>
+    <button id="btnHist">ประวัติ</button>
+    <button id="btnSet">ตั้งค่า</button>
+  </div>
+
+  <div class="sheet" id="sheetSet">
+    <h3>ตั้งค่า</h3>
+    <div class="row" id="zoomRow" hidden>
+      <label>ซูมกล้อง: <span id="zoomVal"></span></label>
+      <input type="range" id="zoom">
+    </div>
+    <div class="row">
+      <label>สีตัวอักษรซับ</label>
+      <select id="mode">
+        <option value="white">ตัวขาว (ซับเกมส่วนใหญ่)</option>
+        <option value="auto">อัตโนมัติ</option>
+        <option value="dark">ตัวดำ / ตัวสีเข้ม</option>
+      </select>
+    </div>
+    <div class="row">
+      <label>ความสว่างขั้นต่ำของตัวอักษร: <span id="thrVal"></span> <small>(ใช้กับโหมดตัวขาว/ตัวดำ ดูภาพตัวอย่างด้านล่าง ตัวอักษรต้องเป็นสีดำชัด)</small></label>
+      <input type="range" id="thr" min="60" max="250" step="5">
+    </div>
+    <div class="row">
+      <label>ความไวในการตรวจว่าซับเปลี่ยน: <span id="sensVal"></span></label>
+      <input type="range" id="sens" min="2" max="30" step="1">
+    </div>
+    <div class="row">
+      <label>ภาพที่ส่งให้ OCR (ควรเห็นตัวอักษรสีดำบนพื้นขาว)</label>
+      <canvas id="preview"></canvas>
+    </div>
+    <div class="row"><button id="btnCloseSet">ปิด</button></div>
+  </div>
+
+  <div class="sheet" id="sheetHist">
+    <h3>ประวัติคำแปล</h3>
+    <div id="history"></div>
+    <div class="row"><button id="btnCloseHist">ปิด</button></div>
+  </div>
+
+  <div id="start">
+    <h2 style="margin:0">แปลซับเกม</h2>
+    <p>วางมือถือบนขาตั้งให้นิ่ง เล็งกล้องไปที่จอทีวี แล้วลากกรอบให้ครอบเฉพาะบรรทัดซับ แอปจะอ่านและแปลเป็นไทยให้ทุกครั้งที่ซับเปลี่ยน</p>
+    <button id="btnStart" class="primary">เปิดกล้อง</button>
+    <p id="err"></p>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const video = $('video'), overlay = $('overlay'), octx = overlay.getContext('2d');
+
+  // ---------- settings ----------
+  const DEFAULTS = { box: { x: 0.08, y: 0.70, w: 0.84, h: 0.20 }, mode: 'white', thr: 170, sens: 8 };
+  let S = { ...DEFAULTS };
+  try { Object.assign(S, JSON.parse(localStorage.getItem('subtr') || '{}')); } catch (e) {}
+  const save = () => { try { localStorage.setItem('subtr', JSON.stringify(S)); } catch (e) {} };
+
+  // ---------- state ----------
+  let stream = null, track = null, worker = null, ocrReady = false;
+  let paused = false, editing = false, busy = false;
+  let prevSig = null, lastOcrSig = null, stableTicks = 0, changed = true;
+  let lastEng = '', history = [];
+  const cache = new Map();
+
+  // ---------- camera ----------
+  $('btnStart').onclick = async () => {
+    $('err').textContent = '';
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+      });
+    } catch (e) {
+      $('err').textContent = 'เปิดกล้องไม่ได้: ' + e.message + ' (ต้องเปิดผ่าน https และอนุญาตให้ใช้กล้อง)';
+      return;
+    }
+    video.srcObject = stream;
+    track = stream.getVideoTracks()[0];
+    await video.play().catch(() => {});
+    $('start').style.display = 'none';
+    $('dotCam').className = 'dot on';
+    setupZoom();
+    keepAwake();
+    resize();
+    loop();
+  };
+
+  function setupZoom() {
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    if (!caps.zoom) return;
+    const z = $('zoom');
+    z.min = caps.zoom.min; z.max = caps.zoom.max; z.step = caps.zoom.step || 0.1;
+    z.value = (track.getSettings().zoom) || caps.zoom.min;
+    $('zoomVal').textContent = Number(z.value).toFixed(1) + 'x';
+    $('zoomRow').hidden = false;
+    z.oninput = () => {
+      $('zoomVal').textContent = Number(z.value).toFixed(1) + 'x';
+      track.applyConstraints({ advanced: [{ zoom: Number(z.value) }] }).catch(() => {});
+    };
+  }
+
+  async function keepAwake() {
+    try {
+      if ('wakeLock' in navigator) {
+        await navigator.wakeLock.request('screen');
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') navigator.wakeLock.request('screen').catch(() => {});
+        });
+      }
+    } catch (e) {}
+  }
+
+  // ---------- OCR worker ----------
+  (async () => {
+    try {
+      worker = await Tesseract.createWorker('eng', 1);
+      await worker.setParameters({
+        tessedit_pageseg_mode: '6',            // single uniform block of text
+        preserve_interword_spaces: '1',
+        tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,!?'\"-:;()&%$#/…’‘“”—",
+      });
+      ocrReady = true;
+      $('dotOcr').className = 'dot on';
+      $('stOcr').textContent = 'OCR พร้อม';
+    } catch (e) {
+      $('stOcr').textContent = 'โหลด OCR ไม่ได้ (เช็กอินเทอร์เน็ต)';
+    }
+  })();
+
+  // ---------- geometry: video pixel <-> screen ----------
+  function videoRect() {
+    const cw = overlay.clientWidth, ch = overlay.clientHeight;
+    const vw = video.videoWidth || 16, vh = video.videoHeight || 9;
+    const s = Math.min(cw / vw, ch / vh);
+    const w = vw * s, h = vh * s;
+    return { x: (cw - w) / 2, y: (ch - h) / 2, w, h };
+  }
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    overlay.width = overlay.clientWidth * dpr;
+    overlay.height = overlay.clientHeight * dpr;
+    octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawBox();
+  }
+  window.addEventListener('resize', resize);
+  video.addEventListener('loadedmetadata', resize);
+
+  function drawBox(tmp) {
+    const r = videoRect(), b = tmp || S.box;
+    octx.clearRect(0, 0, overlay.clientWidth, overlay.clientHeight);
+    const x = r.x + b.x * r.w, y = r.y + b.y * r.h, w = b.w * r.w, h = b.h * r.h;
+    if (editing) {
+      octx.fillStyle = 'rgba(0,0,0,0.45)';
+      octx.fillRect(0, 0, overlay.clientWidth, overlay.clientHeight);
+      octx.clearRect(x, y, w, h);
+    }
+    octx.strokeStyle = editing ? '#facc15' : '#22d3ee';
+    octx.lineWidth = 2;
+    octx.setLineDash(editing ? [8, 6] : []);
+    octx.strokeRect(x, y, w, h);
+  }
+
+  // ---------- drag to set box ----------
+  let dragStart = null;
+  const norm = (ev) => {
+    const r = videoRect(), rc = overlay.getBoundingClientRect();
+    return {
+      x: Math.min(1, Math.max(0, (ev.clientX - rc.left - r.x) / r.w)),
+      y: Math.min(1, Math.max(0, (ev.clientY - rc.top - r.y) / r.h)),
+    };
+  };
+  const boxFrom = (a, b) => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y) });
+  overlay.addEventListener('pointerdown', (ev) => {
+    if (!editing) return;
+    dragStart = norm(ev);
+    overlay.setPointerCapture(ev.pointerId);
+  });
+  overlay.addEventListener('pointermove', (ev) => {
+    if (!editing || !dragStart) return;
+    drawBox(boxFrom(dragStart, norm(ev)));
+  });
+  overlay.addEventListener('pointerup', (ev) => {
+    if (!editing || !dragStart) return;
+    const b = boxFrom(dragStart, norm(ev));
+    dragStart = null;
+    if (b.w > 0.03 && b.h > 0.02) { S.box = b; save(); }
+    setEditing(false);
+  });
+  function setEditing(on) {
+    editing = on;
+    $('btnBox').classList.toggle('active', on);
+    $('btnBox').textContent = on ? 'ลากนิ้วครอบซับ…' : 'ลากกรอบซับ';
+    prevSig = null; lastOcrSig = null; changed = true;
+    drawBox();
+  }
+  $('btnBox').onclick = () => setEditing(!editing);
+
+  // ---------- image processing ----------
+  const crop = document.createElement('canvas');
+  const cctx = crop.getContext('2d', { willReadFrequently: true });
+  const preview = $('preview'), pctx = preview.getContext('2d');
+
+  function grabGray() {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw) return null;
+    const b = S.box;
+    const sx = Math.round(b.x * vw), sy = Math.round(b.y * vh);
+    const sw = Math.max(8, Math.round(b.w * vw)), sh = Math.max(8, Math.round(b.h * vh));
+    const scale = Math.max(1, Math.min(3, 1600 / sw));   // upscale small text for Tesseract
+    const W = Math.round(sw * scale), H = Math.round(sh * scale);
+    crop.width = W; crop.height = H;
+    cctx.imageSmoothingEnabled = true;
+    cctx.imageSmoothingQuality = 'high';
+    cctx.drawImage(video, sx, sy, sw, sh, 0, 0, W, H);
+    const img = cctx.getImageData(0, 0, W, H);
+    const d = img.data, g = new Uint8ClampedArray(W * H);
+    for (let i = 0, j = 0; j < g.length; i += 4, j++) g[j] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
+    return { g: blur3(g, W, H), W, H, img };
+  }
+
+  // 3x3 box blur: smooths camera moiré / TV pixel grid
+  function blur3(src, W, H) {
+    const out = new Uint8ClampedArray(src.length);
+    for (let y = 0; y < H; y++) {
+      const y0 = Math.max(0, y - 1) * W, y1 = y * W, y2 = Math.min(H - 1, y + 1) * W;
+      for (let x = 0; x < W; x++) {
+        const xa = Math.max(0, x - 1), xb = Math.min(W - 1, x + 1);
+        out[y1 + x] = (src[y0 + xa] + src[y0 + x] + src[y0 + xb] + src[y1 + xa] + src[y1 + x] + src[y1 + xb]
+          + src[y2 + xa] + src[y2 + x] + src[y2 + xb]) / 9;
+      }
+    }
+    return out;
+  }
+
+  // small signature (48x12 grid of mean brightness) to detect subtitle changes cheaply
+  function signature(g, W, H) {
+    const GX = 48, GY = 12, sig = new Float32Array(GX * GY), cnt = new Uint32Array(GX * GY);
+    for (let y = 0; y < H; y += 2) {
+      const cy = Math.min(GY - 1, (y * GY / H) | 0);
+      for (let x = 0; x < W; x += 2) {
+        const k = cy * GX + Math.min(GX - 1, (x * GX / W) | 0);
+        sig[k] += g[y * W + x]; cnt[k]++;
+      }
+    }
+    for (let k = 0; k < sig.length; k++) sig[k] /= cnt[k] || 1;
+    return sig;
+  }
+  function sigDiff(a, b) {
+    if (!a || !b) return 999;
+    let s = 0;
+    for (let k = 0; k < a.length; k++) s += Math.abs(a[k] - b[k]);
+    return s / a.length;
+  }
+
+  function otsu(g) {
+    const hist = new Uint32Array(256);
+    for (let i = 0; i < g.length; i++) hist[g[i]]++;
+    let sum = 0; for (let t = 0; t < 256; t++) sum += t * hist[t];
+    let sumB = 0, wB = 0, best = 0, thr = 127;
+    for (let t = 0; t < 256; t++) {
+      wB += hist[t]; if (!wB) continue;
+      const wF = g.length - wB; if (!wF) break;
+      sumB += t * hist[t];
+      const mB = sumB / wB, mF = (sum - sumB) / wF, v = wB * wF * (mB - mF) * (mB - mF);
+      if (v > best) { best = v; thr = t; }
+    }
+    return thr;
+  }
+
+  // -> black text on white background (what Tesseract likes)
+  function binarize({ g, W, H, img }) {
+    const d = img.data;
+    let thr = S.thr, textIsBright = true;
+    if (S.mode === 'dark') textIsBright = false;
+    if (S.mode === 'auto') {
+      thr = otsu(g);
+      let bright = 0; for (let i = 0; i < g.length; i++) if (g[i] > thr) bright++;
+      textIsBright = bright < g.length / 2;           // text is usually the minority
+    }
+    for (let j = 0, i = 0; j < g.length; j++, i += 4) {
+      const isText = textIsBright ? g[j] >= thr : g[j] <= (S.mode === 'dark' ? 255 - thr : thr);
+      const v = isText ? 0 : 255;
+      d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255;
+    }
+    cctx.putImageData(img, 0, 0);
+    if ($('sheetSet').classList.contains('open')) {
+      preview.width = W; preview.height = H;
+      pctx.drawImage(crop, 0, 0);
+    }
+    return crop;
+  }
+
+  // ---------- text helpers ----------
+  function cleanText(data) {
+    const words = (data.words || []).filter(w => w.confidence >= 45).map(w => w.text);
+    let t = (words.length ? words.join(' ') : (data.text || '')).replace(/\s+/g, ' ').trim();
+    t = t.replace(/[|_~=<>{}\[\]]+/g, '').replace(/\s+([.,!?;:])/g, '$1');
+    // drop stray 1-char junk except real words
+    t = t.split(' ').filter(w => {
+      const core = w.replace(/[^A-Za-z0-9]/g, '');
+      return core.length > 1 || /^[AaI0-9]$/.test(core);
+    }).join(' ');
+    return t.trim();
+  }
+  function letters(t) { return (t.match(/[A-Za-z]/g) || []).length; }
+  function similarity(a, b) {
+    a = a.toLowerCase().replace(/[^a-z0-9]/g, ''); b = b.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!a || !b) return 0;
+    if (a === b) return 1;
+    const m = a.length, n = b.length; let prev = new Array(n + 1), cur = new Array(n + 1);
+    for (let j = 0; j <= n; j++) prev[j] = j;
+    for (let i = 1; i <= m; i++) {
+      cur[0] = i;
+      for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      [prev, cur] = [cur, prev];
+    }
+    return 1 - prev[n] / Math.max(m, n);
+  }
+
+  async function translate(text) {
+    if (cache.has(text)) return cache.get(text);
+    const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=th&dt=t&q=' + encodeURIComponent(text);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const j = await res.json();
+    const th = (j[0] || []).map(x => x[0]).join('');
+    cache.set(text, th);
+    if (cache.size > 300) cache.delete(cache.keys().next().value);
+    return th;
+  }
+
+  // ---------- main pipeline ----------
+  async function runOcr(force) {
+    if (!ocrReady || busy) return;
+    const frame = grabGray(); if (!frame) return;
+    busy = true;
+    $('dotOcr').className = 'dot busy';
+    const t0 = performance.now();
+    try {
+      lastOcrSig = signature(frame.g, frame.W, frame.H);
+      const { data } = await worker.recognize(binarize(frame));
+      const eng = cleanText(data);
+      const t1 = performance.now();
+      if (letters(eng) < 3) { $('stTime').textContent = 'ไม่พบข้อความ'; return; }
+      if (!force && similarity(eng, lastEng) > 0.82) { $('stTime').textContent = 'ซับเดิม'; return; }
+      lastEng = eng;
+      $('eng').textContent = eng;
+      const th = await translate(eng);
+      const t2 = performance.now();
+      $('thai').textContent = th;
+      $('stTime').textContent = `อ่าน ${Math.round(t1 - t0)}ms · แปล ${Math.round(t2 - t1)}ms`;
+      history.unshift({ en: eng, th });
+      if (history.length > 50) history.pop();
+    } catch (e) {
+      $('stTime').textContent = 'ผิดพลาด: ' + e.message;
+    } finally {
+      busy = false;
+      $('dotOcr').className = 'dot on';
+    }
+  }
+
+  // every ~200ms: check if subtitle area changed; OCR once it has settled
+  function loop() {
+    setTimeout(loop, 200);
+    if (paused || editing || busy || !ocrReady) return;
+    const f = grabGray(); if (!f) return;
+    const sig = signature(f.g, f.W, f.H);
+    const d = sigDiff(sig, prevSig);
+    prevSig = sig;
+    if (d > S.sens) { changed = true; stableTicks = 0; return; }   // still moving / fading
+    stableTicks++;
+    if (changed && stableTicks >= 1) {
+      changed = false;
+      runOcr(false);
+    } else if (sigDiff(sig, lastOcrSig) > S.sens * 1.5) {
+      changed = true;   // slow change (e.g. fade) that slipped past the per-tick check
+    }
+  }
+
+  // ---------- UI ----------
+  $('btnPause').onclick = () => {
+    paused = !paused;
+    $('btnPause').textContent = paused ? 'เริ่มต่อ' : 'หยุด';
+    $('btnPause').classList.toggle('active', paused);
+  };
+  $('btnNow').onclick = () => { lastEng = ''; runOcr(true); };
+
+  const openSheet = (id) => { ['sheetSet', 'sheetHist'].forEach(s => $(s).classList.toggle('open', s === id)); };
+  $('btnSet').onclick = () => openSheet($('sheetSet').classList.contains('open') ? null : 'sheetSet');
+  $('btnCloseSet').onclick = () => openSheet(null);
+  $('btnHist').onclick = () => {
+    $('history').innerHTML = '';
+    for (const h of history) {
+      const div = document.createElement('div');
+      const a = document.createElement('div'); a.className = 'h-th'; a.textContent = h.th;
+      const b = document.createElement('div'); b.className = 'h-en'; b.textContent = h.en;
+      div.append(a, b); $('history').append(div);
+    }
+    if (!history.length) $('history').textContent = 'ยังไม่มี';
+    openSheet($('sheetHist').classList.contains('open') ? null : 'sheetHist');
+  };
+  $('btnCloseHist').onclick = () => openSheet(null);
+
+  const bindRange = (id, key, fmt) => {
+    const el = $(id), out = $(id + 'Val');
+    el.value = S[key]; out.textContent = fmt(S[key]);
+    el.oninput = () => { S[key] = Number(el.value); out.textContent = fmt(S[key]); save(); changed = true; previewTick(); };
+  };
+  bindRange('thr', 'thr', v => v);
+  bindRange('sens', 'sens', v => v <= 5 ? `${v} (ไวมาก)` : v >= 18 ? `${v} (ไม่ไว)` : v);
+  $('mode').value = S.mode;
+  $('mode').onchange = () => { S.mode = $('mode').value; save(); changed = true; previewTick(); };
+
+  // keep the preview live while settings are open
+  function previewTick() { if (!busy) { const f = grabGray(); if (f) binarize(f); } }
+  setInterval(() => { if ($('sheetSet').classList.contains('open')) previewTick(); }, 400);
+})();
+</script>
+</body>
